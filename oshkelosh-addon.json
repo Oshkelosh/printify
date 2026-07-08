@@ -1,0 +1,9 @@
+{
+  "addon_id": "printify",
+  "addon_name": "Printify",
+  "addon_description": "Print-on-demand supplier via Printify.",
+  "category": "supplier",
+  "version": "1.0.0",
+  "min_oshkelosh_version": "0.1.0",
+  "python_requires": ">=3.11"
+}

@@ -1,0 +1,1 @@
+"""Printify supplier addon package."""
