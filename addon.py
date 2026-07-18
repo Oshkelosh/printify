@@ -18,9 +18,11 @@ from app.addons.suppliers.printify.client import (
     PrintifyClient,
     build_line_items,
     map_address_to,
+    parse_shipping_rate_options,
+    resolve_shipping_method_id,
 )
 from schemas.supplier import SupplierCatalogProduct
-from app.addons.log import info, warning
+from app.addons.log import exception, info, warning
 from app.addons.config_serialization import dump_addon_config
 
 
@@ -183,6 +185,66 @@ class PrintifyAddon(SupplierAddon):
         client = self._require_client()
         return await client.get_product(product_id)
 
+    def supports_shipping_quotes(self) -> bool:
+        return True
+
+    async def quote_shipping(
+        self,
+        items: List[Dict[str, Any]],
+        shipping_address: Dict[str, Any],
+        *,
+        currency: str | None = None,
+    ) -> int | None:
+        """Live Printify rates; prefer standard, else cheapest. None → Site Settings."""
+        details = await self.quote_shipping_details(items, shipping_address, currency=currency)
+        if details is None:
+            return None
+        return int(details["cents"])
+
+    async def quote_shipping_details(
+        self,
+        items: List[Dict[str, Any]],
+        shipping_address: Dict[str, Any],
+        *,
+        selected_id: str | None = None,
+        currency: str | None = None,
+    ) -> Dict[str, Any] | None:
+        """Live Printify methods with prices; selected_id overrides the default."""
+        if currency and str(currency).upper() != "USD":
+            # Printify quotes shipping in USD only; returning those cents under a
+            # different shop currency would mix units. Fall back to Site Settings.
+            return None
+        from app.addons.suppliers.shipping_quote import pick_shipping_option
+
+        client = self._require_client()
+        try:
+            line_items = build_line_items(items)
+            if not line_items:
+                return None
+            rates = await client.calculate_shipping(
+                line_items,
+                map_address_to(shipping_address or {}),
+            )
+            options = parse_shipping_rate_options(rates)
+            chosen = pick_shipping_option(
+                options,
+                selected_id=selected_id,
+                preferred_ids=("standard",),
+            )
+            if chosen is None:
+                return None
+            return {
+                "cents": int(chosen["cents"]),
+                "selected_id": str(chosen["id"]),
+                "options": options,
+            }
+        except PrintifyAPIError as exc:
+            warning("Printify", "quote_shipping error: {}", exc)
+            return None
+        except Exception:
+            exception("Printify", "quote_shipping unexpected error")
+            return None
+
     async def create_order(
         self,
         items: List[Dict[str, Any]],
@@ -190,8 +252,10 @@ class PrintifyAddon(SupplierAddon):
         *,
         external_id: str | None = None,
         supplier_ref: str | None = None,
+        shipping_method: str | None = None,
+        currency: str | None = None,
     ) -> Dict[str, Any]:
-        del supplier_ref
+        del supplier_ref, currency
         client = self._require_client()
         try:
             line_items = build_line_items(items)
@@ -200,7 +264,7 @@ class PrintifyAddon(SupplierAddon):
 
             payload: Dict[str, Any] = {
                 "line_items": line_items,
-                "shipping_method": 1,
+                "shipping_method": resolve_shipping_method_id(shipping_method),
                 "send_shipping_notification": False,
                 "address_to": map_address_to(shipping_address),
             }

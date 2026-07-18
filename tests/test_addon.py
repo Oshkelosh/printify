@@ -27,6 +27,93 @@ class TestPrintifyAddon:
         with pytest.raises(Exception):
             PrintifyConfig()
 
+    def test_supports_shipping_quotes(self):
+        assert PrintifyAddon().supports_shipping_quotes() is True
+
+    @pytest.mark.asyncio
+    async def test_quote_shipping_returns_cents(self):
+        addon = PrintifyAddon()
+        addon._client = AsyncMock()
+        addon._client.calculate_shipping = AsyncMock(
+            return_value={"standard": 599, "express": 1200}
+        )
+        cents = await addon.quote_shipping(
+            [
+                {
+                    "supplier_product_id": "prod-1",
+                    "supplier_variant_id": "17887",
+                    "quantity": 1,
+                }
+            ],
+            {"country": "US", "zip": "97201"},
+        )
+        assert cents == 599
+
+    @pytest.mark.asyncio
+    async def test_quote_shipping_returns_none_on_api_error(self):
+        from app.addons.suppliers.printify.client import PrintifyAPIError
+
+        addon = PrintifyAddon()
+        addon._client = AsyncMock()
+        addon._client.calculate_shipping = AsyncMock(
+            side_effect=PrintifyAPIError("bad request", status_code=400)
+        )
+        cents = await addon.quote_shipping(
+            [
+                {
+                    "supplier_product_id": "prod-1",
+                    "supplier_variant_id": "17887",
+                    "quantity": 1,
+                }
+            ],
+            {"country": "US"},
+        )
+        assert cents is None
+
+    @pytest.mark.asyncio
+    async def test_quote_shipping_details_honors_selected_method(self):
+        addon = PrintifyAddon()
+        addon._client = AsyncMock()
+        addon._client.calculate_shipping = AsyncMock(
+            return_value={"standard": 599, "express": 1200}
+        )
+        details = await addon.quote_shipping_details(
+            [
+                {
+                    "supplier_product_id": "prod-1",
+                    "supplier_variant_id": "17887",
+                    "quantity": 1,
+                }
+            ],
+            {"country": "US"},
+            selected_id="express",
+        )
+        assert details is not None
+        assert details["cents"] == 1200
+        assert details["selected_id"] == "express"
+        assert [row["id"] for row in details["options"]] == ["standard", "express"]
+
+    @pytest.mark.asyncio
+    async def test_create_order_sends_shipping_method(self):
+        addon = PrintifyAddon()
+        addon._config = {"auto_confirm": False}
+        addon._client = AsyncMock()
+        addon._client.create_order = AsyncMock(return_value={"id": "ord-1"})
+        result = await addon.create_order(
+            [
+                {
+                    "supplier_product_id": "prod-1",
+                    "supplier_variant_id": "17887",
+                    "quantity": 1,
+                }
+            ],
+            {"line1": "1 Main", "city": "Austin", "zip": "78701", "country": "US"},
+            shipping_method="express",
+        )
+        assert result["success"] is True
+        payload = addon._client.create_order.await_args.args[0]
+        assert payload["shipping_method"] == 3
+
 
 @pytest.mark.asyncio
 async def test_list_products_fetches_detail_when_variants_missing():

@@ -49,6 +49,7 @@ Multiple suppliers can be enabled at the same time. Fulfillment runs when an ord
 
 - **Variant supplier fields:** paid-order fulfillment reads Printify IDs from each **ProductVariant** row
 - **Fulfillment:** creates Printify order; optional send-to-production when `auto_confirm` is true
+- **Checkout shipping:** core calls `quote_shipping()` → `POST orders/shipping.json` for Printify line items (prefers standard, else cheapest). Unquoted or failed quotes fall back to Site Settings like any other supplier.
 - **Grouping:** line items grouped by fulfillment key `printify`
 
 ## Variant supplier fields
