@@ -21,16 +21,22 @@ class PrintifyAPIError(Exception):
 class PrintifyClient:
     """Thin async wrapper around Printify REST endpoints."""
 
-    def __init__(self, api_key: str, shop_id: str, *, timeout: float = 30.0):
+    def __init__(self, api_key: str, shop_id: str | None = None, *, timeout: float = 30.0):
         self._api_key = api_key
-        self._shop_id = str(shop_id)
+        self._shop_id = str(shop_id).strip() if shop_id else ""
         self._timeout = timeout
 
     def _headers(self) -> dict[str, str]:
         return {
             "Authorization": f"Bearer {self._api_key}",
             "Content-Type": "application/json",
+            "User-Agent": "Oshkelosh/printify",
         }
+
+    def _require_shop_id(self) -> str:
+        if not self._shop_id:
+            raise PrintifyAPIError("Printify shop_id is not set")
+        return self._shop_id
 
     async def _request(
         self,
@@ -60,17 +66,49 @@ class PrintifyClient:
             raise PrintifyAPIError(str(message), status_code=resp.status_code, body=data)
         return data if isinstance(data, dict) else {"data": data}
 
+    async def list_shops(self) -> list[dict[str, Any]]:
+        """GET /shops.json — token-scoped shops (no shop_id in path)."""
+        data = await self._request("GET", "/shops.json")
+        if isinstance(data, list):
+            return [row for row in data if isinstance(row, dict)]
+        rows = data.get("data") if isinstance(data, dict) else None
+        if isinstance(rows, list):
+            return [row for row in rows if isinstance(row, dict)]
+        return []
+
     async def list_products(self, *, page: int = 1, limit: int = 50) -> dict[str, Any]:
+        shop_id = self._require_shop_id()
         return await self._request(
             "GET",
-            f"/shops/{self._shop_id}/products.json",
+            f"/shops/{shop_id}/products.json",
             params={"page": page, "limit": limit},
         )
 
     async def get_product(self, product_id: str) -> dict[str, Any]:
+        shop_id = self._require_shop_id()
         return await self._request(
             "GET",
-            f"/shops/{self._shop_id}/products/{product_id}.json",
+            f"/shops/{shop_id}/products/{product_id}.json",
+        )
+
+    async def get_blueprint(self, blueprint_id: int | str) -> dict[str, Any]:
+        """GET /catalog/blueprints/{id}.json — catalog product type (no shop_id)."""
+        return await self._request(
+            "GET",
+            f"/catalog/blueprints/{blueprint_id}.json",
+        )
+
+    async def calculate_shipping(
+        self,
+        line_items: list[dict[str, Any]],
+        address_to: dict[str, Any],
+    ) -> dict[str, Any]:
+        """POST orders/shipping.json — shipping costs (in cents) for a cart."""
+        shop_id = self._require_shop_id()
+        return await self._request(
+            "POST",
+            f"/shops/{shop_id}/orders/shipping.json",
+            json={"line_items": line_items, "address_to": address_to},
         )
 
     async def calculate_shipping(
@@ -86,22 +124,25 @@ class PrintifyClient:
         )
 
     async def create_order(self, payload: dict[str, Any]) -> dict[str, Any]:
+        shop_id = self._require_shop_id()
         return await self._request(
             "POST",
-            f"/shops/{self._shop_id}/orders.json",
+            f"/shops/{shop_id}/orders.json",
             json=payload,
         )
 
     async def send_to_production(self, order_id: str) -> dict[str, Any]:
+        shop_id = self._require_shop_id()
         return await self._request(
             "POST",
-            f"/shops/{self._shop_id}/orders/{order_id}/send_to_production.json",
+            f"/shops/{shop_id}/orders/{order_id}/send_to_production.json",
         )
 
     async def get_order(self, order_id: str) -> dict[str, Any]:
+        shop_id = self._require_shop_id()
         return await self._request(
             "GET",
-            f"/shops/{self._shop_id}/orders/{order_id}.json",
+            f"/shops/{shop_id}/orders/{order_id}.json",
         )
 
 

@@ -17,15 +17,18 @@ Multiple suppliers can be enabled at the same time. Fulfillment runs when an ord
 ## Enable and configure
 
 1. Install this package under `app/addons/suppliers/printify/`
-2. Open **Admin → Suppliers → Printify** at `/admin/suppliers/printify`
-3. Enter API credentials and enable the addon
+2. In Printify: create a Personal Access Token (My Profile → Connections) and connect an **API** store (My Stores → Add store → API)
+3. Open **Admin → Suppliers → Printify** at `/admin/suppliers/printify`
+4. Paste the token, enable the addon, and save — shop ID is auto-discovered from `GET /v1/shops.json`
+
+Tokens are long JWT-style strings; that is normal. Required scopes: `shops.read`, `products.read`, `orders.read`, `orders.write`, and `catalog.read` (blueprint title → category on sync).
 
 ## Configuration schema
 
 | Field | Type | Description |
 |-------|------|-------------|
 | `api_key` | secret | Printify Personal Access Token |
-| `shop_id` | string | Printify shop ID |
+| `shop_id` | string | Auto-filled on save when the token has exactly one shop; optional override for multi-shop tokens |
 | `is_active` | bool | Whether the addon is active |
 | `auto_confirm` | bool | Send order to production after create |
 
@@ -36,6 +39,7 @@ Multiple suppliers can be enabled at the same time. Fulfillment runs when an ord
 | Method | Path | Description |
 |--------|------|-------------|
 | GET | `/api/v1/suppliers/printify/products` | List catalog products |
+| GET | `/api/v1/suppliers/printify/products/{id}` | Single product detail |
 
 ### Admin
 
@@ -64,29 +68,43 @@ Both IDs come from your Printify shop catalog. Catalog sync sets them on each im
 
 ## Catalog sync
 
-Supported. Admin sync at `/admin/suppliers/printify` or `POST /api/v1/admin/suppliers/printify/sync`.
+Supported. Admin sync at `/admin/suppliers/printify` or `POST /admin/suppliers/printify/sync`.
 
-**Import model:** one Oshkelosh **Product** per Printify product; one **ProductVariant** per enabled variant.
+**Import model:** one Oshkelosh **Product** per Printify shop product; one **ProductVariant** per enabled variant.
 
 | Key | Format |
 |-----|--------|
 | Product parent key | `printify:{productId}` |
 | Variant dedup key | `printify:{productId}:{variantId}` |
 
+**Parent vs variant fields:**
+
+- Product **name** / **description** come from the shop product (`title` / `description`), not from a variant title. Printify descriptions are often HTML — import strips tags to plain text.
+- Variant **title** is Printful-style: `{shop product title} / {Printify variant.title}` (e.g. `Cool Tee / Black / L`).
+- Variant **attributes** (storefront Size/Color pickers) come from shop product option definitions: product `options` axes + each variant’s `options` **ID list** are resolved to `color`/`size` (etc.), then mapped to `Color`/`Size`. Catalog-style `{color, size}` dicts are also accepted. Empty attributes force a flat title list in VariantPicker — re-sync refreshes attributes on existing variants.
+- **Product type** is the catalog blueprint title (`GET /catalog/blueprints/{blueprint_id}.json`), stored as `products.options["Product type"]` and used by core `assign_product_category_from_type` on first import (creates/links a Category). Category assignment runs on create only — re-sync updates names/descriptions/attributes but not category on existing rows.
+
+**Images:** Sync downloads Printify mockups onto **variants** only (`SupplierCatalogProduct.image_urls` stays empty, same as Printful). Core stores local media as root-relative `/media/files/...` URLs so admin works on any browse host; set `PUBLIC_APP_URL` for absolute SEO/email links. Re-sync does not re-download images for existing variants.
+
 **Prerequisites:**
 
-- Products must exist in the configured **shop ID**.
+- Products must exist in the auto-discovered (or override) shop.
 - Hidden products and disabled variants are skipped.
+- PAT needs `catalog.read` for blueprint → category mapping.
+- Nested-git **Admin → Update** overwrites this package — commit fixes into the Printify addon repo before updating.
 
 ## Provider setup
 
-- Generate a Personal Access Token and note your shop ID from Printify.
+1. Generate a Personal Access Token with the scopes above (token is shown once).
+2. My Stores → Add store → **API** → Connect (required; otherwise shop list is empty).
+3. Paste the token in Admin → Suppliers → Printify and save. Shop ID is resolved automatically when the token has one shop. If you have multiple shops, set the multi-shop override field to the integer shop `id` from the error message.
 
 ## Package layout
 
 ```
 printify/
 ├── README.md
+├── AGENTS.md
 ├── addon.py
 ├── catalog.py
 ├── client.py
@@ -96,5 +114,6 @@ printify/
 
 ## See also
 
+- [AGENTS.md](AGENTS.md) — package invariants
 - [Supplier addon development](../README.md)
 - [Oshkelosh addon guide](../../README.md)

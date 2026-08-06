@@ -20,17 +20,22 @@
         <div class="form-group">
             <label for="api_key">Personal Access Token</label>
             <input type="password" id="api_key" name="api_key"
-                   value="{{ config.get('api_key', '') }}"
-                   placeholder="Printify API token" />
+                   value=""
+                   placeholder="{% if config.get('api_key') %}Key saved — paste to replace{% else %}Printify Personal Access Token{% endif %}" />
+            <small style="color:var(--clr-text-muted);display:block;margin-top:4px;">
+                Generate under Printify → My Profile → Connections. Tokens are long JWT-style strings — that is normal.
+                Include <code>catalog.read</code> so sync can map blueprint → category.
+                Connect an API store under My Stores first; shop ID is discovered automatically on save.
+            </small>
         </div>
 
         <div class="form-group">
-            <label for="shop_id">Shop ID</label>
+            <label for="shop_id">Shop ID (multi-shop override)</label>
             <input type="text" id="shop_id" name="shop_id"
                    value="{{ config.get('shop_id', '') }}"
-                   placeholder="Printify shop ID" required />
+                   placeholder="Leave blank to auto-detect" />
             <small style="color:var(--clr-text-muted);display:block;margin-top:4px;">
-                Find this in your Printify dashboard or via GET /v1/shops.json.
+                Only needed if this token has more than one shop. Printify does not show shop IDs in the dashboard.
             </small>
         </div>
 
@@ -61,9 +66,9 @@
 <div class="card" style="margin-top:1.5em;">
     <h2>Catalog sync</h2>
     <p style="color:var(--clr-text-muted);margin-bottom:12px;">
-        Import Printify shop variants into Oshkelosh products (one local product per variant).
-        Re-sync updates name, price, SKU, and supplier tags. Manual edits to those fields
-        will be overwritten on the next sync.
+        Import Printify shop products into Oshkelosh (one local product per Printify product;
+        variants grouped under it). Re-sync updates name, price, SKU, and supplier tags.
+        Manual edits to those fields will be overwritten on the next sync.
     </p>
     <form method="post" action="/admin/suppliers/printify/sync" class="form">
         <input type="hidden" name="csrf_token" value="{{ csrf_token }}">

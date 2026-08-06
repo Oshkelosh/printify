@@ -1,6 +1,12 @@
 """Unit tests for Printify API client helpers."""
 
+from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
+
 from app.addons.suppliers.printify.client import (
+    PrintifyAPIError,
+    PrintifyClient,
     build_line_items,
     map_address_to,
     parse_shipping_rate_options,
@@ -73,3 +79,37 @@ def test_resolve_shipping_method_id():
     assert resolve_shipping_method_id("express") == 3
     assert resolve_shipping_method_id("2") == 2
     assert resolve_shipping_method_id("unknown") == 1
+
+
+def test_headers_include_user_agent():
+    client = PrintifyClient("tok")
+    headers = client._headers()
+    assert headers["Authorization"] == "Bearer tok"
+    assert headers["User-Agent"] == "Oshkelosh/printify"
+
+
+def test_shop_scoped_methods_require_shop_id():
+    client = PrintifyClient("tok")
+    with pytest.raises(PrintifyAPIError, match="shop_id is not set"):
+        client._require_shop_id()
+
+
+@pytest.mark.asyncio
+async def test_list_shops_parses_array_response():
+    client = PrintifyClient("tok")
+    resp = MagicMock()
+    resp.status_code = 200
+    resp.json.return_value = [{"id": 5432, "title": "API Store"}]
+    resp.text = "[]"
+
+    mock_http = AsyncMock()
+    mock_http.__aenter__ = AsyncMock(return_value=mock_http)
+    mock_http.__aexit__ = AsyncMock(return_value=None)
+    mock_http.request = AsyncMock(return_value=resp)
+
+    with patch("httpx.AsyncClient", return_value=mock_http):
+        shops = await client.list_shops()
+
+    assert shops == [{"id": 5432, "title": "API Store"}]
+    call_kwargs = mock_http.request.await_args.kwargs
+    assert call_kwargs["headers"]["User-Agent"] == "Oshkelosh/printify"

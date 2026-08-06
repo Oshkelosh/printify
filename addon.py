@@ -12,7 +12,12 @@ from fastapi import APIRouter
 from pydantic import BaseModel, Field, SecretStr
 
 from app.addons.suppliers.base import SupplierAddon
-from app.addons.suppliers.printify.catalog import normalize_printify_catalog_products
+from app.addons.suppliers.printify.catalog import (
+    build_printify_option_value_index,
+    normalize_printify_catalog_products,
+    resolve_printify_blueprint_product_type,
+    resolve_printify_variant_options,
+)
 from app.addons.suppliers.printify.client import (
     PrintifyAPIError,
     PrintifyClient,
@@ -30,7 +35,10 @@ class PrintifyConfig(BaseModel):
     """Configuration for the Printify supplier addon."""
 
     api_key: SecretStr = Field(default=..., description="Printify Personal Access Token")
-    shop_id: str = Field(default=..., min_length=1, description="Printify shop ID")
+    shop_id: str = Field(
+        default="",
+        description="Printify shop ID (auto-discovered when empty and the token has one shop)",
+    )
     is_active: bool = Field(default=False, description="Whether the addon is active")
     auto_confirm: bool = Field(
         default=True,
@@ -40,6 +48,52 @@ class PrintifyConfig(BaseModel):
     @classmethod
     def config_model(cls):
         return cls
+
+
+async def resolve_printify_shop_id(api_key: str, shop_id: str = "") -> str:
+    """Resolve shop_id from config or GET /shops.json (Printify never shows it in the UI)."""
+    from app.core.exceptions import ValidationError
+
+    existing = str(shop_id or "").strip()
+    if existing:
+        return existing
+
+    client = PrintifyClient(api_key)
+    try:
+        shops = await client.list_shops()
+    except PrintifyAPIError as exc:
+        if exc.status_code == 401:
+            raise ValidationError(message="Invalid API key — check your credentials") from exc
+        if exc.status_code == 403:
+            raise ValidationError(
+                message="API key is valid but missing required permissions: shops.read"
+            ) from exc
+        raise ValidationError(message=f"Printify API error: {exc}") from exc
+
+    if len(shops) == 1:
+        shop = shops[0]
+        resolved = str(shop.get("id") or "").strip()
+        if not resolved:
+            raise ValidationError(message="Printify returned a shop without an id")
+        return resolved
+
+    if not shops:
+        raise ValidationError(
+            message=(
+                "No Printify shops for this token. "
+                "In Printify go to My Stores → Add store → API, then save again."
+            )
+        )
+
+    listing = ", ".join(
+        f"{row.get('id')} ({row.get('title') or 'untitled'})" for row in shops
+    )
+    raise ValidationError(
+        message=(
+            f"This token has multiple Printify shops: {listing}. "
+            "Set Shop ID (multi-shop override) to the shop you want."
+        )
+    )
 
 
 class PrintifyAddon(SupplierAddon):
@@ -55,6 +109,7 @@ class PrintifyAddon(SupplierAddon):
 
     _config: Dict[str, Any] | None = None
     _client: PrintifyClient | None = None
+    _blueprint_title_cache: Dict[int, str] | None = None
 
     @classmethod
     def config_schema(cls):
@@ -63,14 +118,16 @@ class PrintifyAddon(SupplierAddon):
     async def initialize(self, config: dict) -> None:
         schema = self.config_schema()
         validated = schema(**config)
-        self._config = dump_addon_config(validated)
-        self._client = PrintifyClient(
-            validated.api_key.get_secret_value(),
-            validated.shop_id,
-        )
+        api_key = validated.api_key.get_secret_value()
+        shop_id = await resolve_printify_shop_id(api_key, validated.shop_id)
+        config["shop_id"] = shop_id
+        self._config = {**dump_addon_config(validated), "shop_id": shop_id}
+        self._client = PrintifyClient(api_key, shop_id)
         self.is_enabled = validated.is_active
-        info("Printify", "Initialized shop_id={} auto_confirm={}",
-            validated.shop_id,
+        info(
+            "Printify",
+            "Initialized shop_id={} auto_confirm={}",
+            shop_id,
             validated.auto_confirm,
         )
 
@@ -81,15 +138,19 @@ class PrintifyAddon(SupplierAddon):
         api_key = validated.api_key.get_secret_value()
         if not api_key:
             return
-        client = PrintifyClient(api_key, validated.shop_id)
         try:
+            shop_id = await resolve_printify_shop_id(api_key, validated.shop_id)
+            config["shop_id"] = shop_id
+            client = PrintifyClient(api_key, shop_id)
             await client.list_products(limit=1)
+        except ValidationError:
+            raise
         except PrintifyAPIError as exc:
             if exc.status_code == 401:
                 raise ValidationError(message="Invalid API key — check your credentials") from exc
             if exc.status_code == 403:
                 raise ValidationError(
-                    message="API key is valid but missing required permissions: catalog:read"
+                    message="API key is valid but missing required permissions: products.read"
                 ) from exc
             raise ValidationError(message=f"Printify API error: {exc}") from exc
 
@@ -112,30 +173,60 @@ class PrintifyAddon(SupplierAddon):
 
     def _flatten_shop_product(self, product: dict[str, Any]) -> List[Dict[str, Any]]:
         product_id = product.get("id", "")
-        title = product.get("title", "Unknown")
+        product_title = str(product.get("title") or "Unknown").strip() or "Unknown"
         description = product.get("description")
         visible = product.get("visible", True)
         images = product.get("images") or []
+        blueprint_id = product.get("blueprint_id")
+        option_index = build_printify_option_value_index(product.get("options"))
         rows: List[Dict[str, Any]] = []
         for variant in product.get("variants") or []:
             if not isinstance(variant, dict):
                 continue
             variant_id = variant.get("id")
             variant_id_str = str(variant_id) if variant_id is not None else ""
-            rows.append(
-                {
-                    "id": variant_id_str,
-                    "product_id": str(product_id),
-                    "variant_id": variant_id_str,
-                    "title": variant.get("title") or title,
-                    "description": description,
-                    "visible": visible,
-                    "images": images,
-                    "sku": variant.get("sku"),
-                    "price": variant.get("price"),
-                    "is_enabled": variant.get("is_enabled", True),
-                }
+            row: Dict[str, Any] = {
+                "id": variant_id_str,
+                "product_id": str(product_id),
+                "variant_id": variant_id_str,
+                "product_title": product_title,
+                "title": variant.get("title") or product_title,
+                "description": description,
+                "visible": visible,
+                "images": images,
+                "blueprint_id": blueprint_id,
+                "sku": variant.get("sku"),
+                "price": variant.get("price"),
+                "is_enabled": variant.get("is_enabled", True),
+            }
+            options = variant.get("options")
+            if isinstance(options, dict):
+                row["options"] = options
+            elif isinstance(options, list):
+                resolved = resolve_printify_variant_options(options, option_index)
+                if resolved:
+                    row["options"] = resolved
+            rows.append(row)
+        return rows
+
+    async def _enrich_rows_with_product_type(
+        self,
+        client: PrintifyClient,
+        rows: List[Dict[str, Any]],
+    ) -> List[Dict[str, Any]]:
+        cache = self._blueprint_title_cache
+        if cache is None:
+            return rows
+        for row in rows:
+            if row.get("product_type"):
+                continue
+            product_type = await resolve_printify_blueprint_product_type(
+                client,
+                row.get("blueprint_id"),
+                catalog_cache=cache,
             )
+            if product_type:
+                row["product_type"] = product_type
         return rows
 
     async def _resolve_shop_product(
@@ -178,8 +269,14 @@ class PrintifyAddon(SupplierAddon):
         return products
 
     async def fetch_catalog_for_import(self, **kwargs: Any) -> List[SupplierCatalogProduct]:
-        raw = await self.list_products(**kwargs)
-        return normalize_printify_catalog_products(raw)
+        client = self._require_client()
+        self._blueprint_title_cache = {}
+        try:
+            raw = await self.list_products(**kwargs)
+            raw = await self._enrich_rows_with_product_type(client, raw)
+            return normalize_printify_catalog_products(raw)
+        finally:
+            self._blueprint_title_cache = None
 
     async def get_product(self, product_id: str) -> Dict[str, Any]:
         client = self._require_client()
