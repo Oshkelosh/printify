@@ -210,6 +210,9 @@ def test_normalize_products_uses_shop_product_title():
         "Cool Tee / White / M",
     ]
     assert product.variants[0].image_urls == ["https://cdn.example/default.jpg"]
+    assert product.variants[0].image_alt_texts == ["Cool Tee / Black / L"]
+    assert product.variants[1].image_urls == ["https://cdn.example/default.jpg"]
+    assert product.variants[1].image_alt_texts == ["Cool Tee / White / M"]
 
 
 def test_variant_image_matches_string_variant_ids():

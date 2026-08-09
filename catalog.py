@@ -334,6 +334,7 @@ def normalize_printify_catalog(raw_items: list[dict[str, Any]]) -> list[Supplier
                 sku=sku,
                 image_url=image_url,
                 image_urls=image_urls,
+                image_alt_texts=[display_name] if image_urls else [],
                 supplier_value="printify",
                 supplier_product_id=product_id,
                 supplier_variant_id=variant_id,
@@ -363,6 +364,7 @@ def normalize_printify_catalog_products(raw_items: list[dict[str, Any]]) -> list
         images = row.get("images") if isinstance(row.get("images"), list) else []
         image_url = _printify_variant_image(images, variant_id)
         image_urls = [image_url] if image_url else []
+        image_alt_texts = [title] if image_urls else []
         external_key = f"printify:{product_id}:{variant_id}"
         attributes = printify_variant_attributes_from_row(row)
 
@@ -377,6 +379,7 @@ def normalize_printify_catalog_products(raw_items: list[dict[str, Any]]) -> list
                 supplier_product_id=product_id,
                 supplier_variant_id=variant_id,
                 image_urls=image_urls,
+                image_alt_texts=image_alt_texts,
                 skip_reason="Printify product is not visible",
             )
         elif row.get("is_enabled") is False:
@@ -390,6 +393,7 @@ def normalize_printify_catalog_products(raw_items: list[dict[str, Any]]) -> list
                 supplier_product_id=product_id,
                 supplier_variant_id=variant_id,
                 image_urls=image_urls,
+                image_alt_texts=image_alt_texts,
                 skip_reason="Printify variant is disabled",
             )
         else:
@@ -410,6 +414,7 @@ def normalize_printify_catalog_products(raw_items: list[dict[str, Any]]) -> list
                 supplier_product_id=product_id,
                 supplier_variant_id=variant_id,
                 image_urls=image_urls,
+                image_alt_texts=image_alt_texts,
             )
 
         if product_id not in groups:
