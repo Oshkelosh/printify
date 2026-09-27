@@ -44,6 +44,10 @@ class PrintifyConfig(BaseModel):
         default=True,
         description="Send orders to production after creation (manual approval shops)",
     )
+    webhook_secret: SecretStr = Field(
+        default="",
+        description="HMAC secret for Printify webhook signature verification",
+    )
 
     @classmethod
     def config_model(cls):
@@ -277,6 +281,17 @@ class PrintifyAddon(SupplierAddon):
             return normalize_printify_catalog_products(raw)
         finally:
             self._blueprint_title_cache = None
+
+    async def after_catalog_sync(self, session: Any, result: Any) -> None:
+        from app.addons.suppliers.printify.publish import acknowledge_touched_products
+
+        keys = list(getattr(result, "touched_product_keys", []) or [])
+        if not keys:
+            return
+        client = self._require_client()
+        errors = await acknowledge_touched_products(client, session, keys)
+        for message in errors:
+            result.errors.append(message)
 
     async def get_product(self, product_id: str) -> Dict[str, Any]:
         client = self._require_client()

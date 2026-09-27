@@ -23,10 +23,12 @@ class TestPrintifyAddon:
             shop_id="12345",
             is_active=True,
             auto_confirm=False,
+            webhook_secret="whsec",
         )
         assert config.api_key.get_secret_value() == "test-token"
         assert config.shop_id == "12345"
         assert config.auto_confirm is False
+        assert config.webhook_secret.get_secret_value() == "whsec"
 
     def test_printify_config_shop_id_optional(self):
         config = PrintifyConfig(api_key="test-token")

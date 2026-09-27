@@ -113,3 +113,83 @@ async def test_list_shops_parses_array_response():
     assert shops == [{"id": 5432, "title": "API Store"}]
     call_kwargs = mock_http.request.await_args.kwargs
     assert call_kwargs["headers"]["User-Agent"] == "Oshkelosh/printify"
+
+
+@pytest.mark.asyncio
+async def test_publish_posts_all_true_body():
+    client = PrintifyClient("tok", shop_id="99")
+    resp = MagicMock()
+    resp.status_code = 200
+    resp.json.return_value = {}
+    resp.text = "{}"
+
+    mock_http = AsyncMock()
+    mock_http.__aenter__ = AsyncMock(return_value=mock_http)
+    mock_http.__aexit__ = AsyncMock(return_value=None)
+    mock_http.request = AsyncMock(return_value=resp)
+
+    with patch("httpx.AsyncClient", return_value=mock_http):
+        await client.publish("prod1")
+
+    method, path = mock_http.request.await_args.args[:2]
+    assert method == "POST"
+    assert path.endswith("/shops/99/products/prod1/publish.json")
+    assert mock_http.request.await_args.kwargs["json"] == {
+        "title": True,
+        "description": True,
+        "images": True,
+        "variants": True,
+        "tags": True,
+        "keyFeatures": True,
+        "shipping_template": True,
+    }
+
+
+@pytest.mark.asyncio
+async def test_publishing_succeeded_posts_external():
+    client = PrintifyClient("tok", shop_id="99")
+    resp = MagicMock()
+    resp.status_code = 200
+    resp.json.return_value = {}
+    resp.text = "{}"
+
+    mock_http = AsyncMock()
+    mock_http.__aenter__ = AsyncMock(return_value=mock_http)
+    mock_http.__aexit__ = AsyncMock(return_value=None)
+    mock_http.request = AsyncMock(return_value=resp)
+
+    with patch("httpx.AsyncClient", return_value=mock_http):
+        await client.publishing_succeeded(
+            "prod1",
+            external_id="42",
+            handle="https://shop.example/products/tee",
+        )
+
+    method, path = mock_http.request.await_args.args[:2]
+    assert method == "POST"
+    assert path.endswith("/shops/99/products/prod1/publishing_succeeded.json")
+    assert mock_http.request.await_args.kwargs["json"] == {
+        "external": {"id": "42", "handle": "https://shop.example/products/tee"}
+    }
+
+
+@pytest.mark.asyncio
+async def test_publishing_failed_and_unpublish():
+    client = PrintifyClient("tok", shop_id="99")
+    resp = MagicMock()
+    resp.status_code = 200
+    resp.json.return_value = {}
+    resp.text = "{}"
+
+    mock_http = AsyncMock()
+    mock_http.__aenter__ = AsyncMock(return_value=mock_http)
+    mock_http.__aexit__ = AsyncMock(return_value=None)
+    mock_http.request = AsyncMock(return_value=resp)
+
+    with patch("httpx.AsyncClient", return_value=mock_http):
+        await client.publishing_failed("prod1", reason="missing")
+        await client.unpublish("prod1")
+
+    paths = [call.args[1] for call in mock_http.request.await_args_list]
+    assert paths[0].endswith("/publishing_failed.json")
+    assert paths[1].endswith("/unpublish.json")

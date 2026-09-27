@@ -57,6 +57,28 @@
             </small>
         </div>
 
+        <div class="form-group">
+            <label for="webhook_secret">Webhook signing secret</label>
+            <input type="password" id="webhook_secret" name="webhook_secret"
+                   value=""
+                   placeholder="{% if config.get('webhook_secret') %}Secret saved — paste to replace{% else %}openssl rand -hex 20{% endif %}" />
+            <small style="color:var(--clr-text-muted);display:block;margin-top:4px;">
+                Used to verify <code>X-Pfy-Signature</code> on publish webhooks.
+                Token needs <code>products.write</code>, <code>webhooks.read</code>, and <code>webhooks.write</code>.
+                Set <code>PUBLIC_APP_URL</code> so the webhook URL is reachable.
+            </small>
+        </div>
+
+        {% if webhook_url %}
+        <div class="form-group">
+            <label>Publish webhook URL</label>
+            <code style="display:block;word-break:break-all;">{{ webhook_url }}</code>
+            <small style="color:var(--clr-text-muted);display:block;margin-top:4px;">
+                Registered automatically for <code>product:publish:started</code> when Active + secret are set.
+            </small>
+        </div>
+        {% endif %}
+
         <div class="form-actions">
             <button type="submit" class="btn btn--primary">Save Configuration</button>
         </div>
@@ -119,6 +141,11 @@
                 <td><code>GET</code></td>
                 <td><code>/api/v1/suppliers/printify/products</code></td>
                 <td>List Printify shop variants</td>
+            </tr>
+            <tr>
+                <td><code>POST</code></td>
+                <td><code>/api/v1/suppliers/printify/webhook</code></td>
+                <td>Printify publish handshake webhook</td>
             </tr>
         </tbody>
     </table>

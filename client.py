@@ -145,6 +145,101 @@ class PrintifyClient:
             f"/shops/{shop_id}/orders/{order_id}.json",
         )
 
+    async def publish(self, product_id: str) -> dict[str, Any]:
+        """POST publish.json — lock the product and start the sales-channel handshake."""
+        shop_id = self._require_shop_id()
+        return await self._request(
+            "POST",
+            f"/shops/{shop_id}/products/{product_id}/publish.json",
+            json={
+                "title": True,
+                "description": True,
+                "images": True,
+                "variants": True,
+                "tags": True,
+                "keyFeatures": True,
+                "shipping_template": True,
+            },
+        )
+
+    async def publishing_succeeded(
+        self,
+        product_id: str,
+        *,
+        external_id: str,
+        handle: str,
+    ) -> dict[str, Any]:
+        """POST publishing_succeeded.json — unlock and set sales-channel external refs."""
+        shop_id = self._require_shop_id()
+        return await self._request(
+            "POST",
+            f"/shops/{shop_id}/products/{product_id}/publishing_succeeded.json",
+            json={"external": {"id": str(external_id), "handle": handle}},
+        )
+
+    async def publishing_failed(self, product_id: str, *, reason: str) -> dict[str, Any]:
+        """POST publishing_failed.json — unlock without setting external refs."""
+        shop_id = self._require_shop_id()
+        return await self._request(
+            "POST",
+            f"/shops/{shop_id}/products/{product_id}/publishing_failed.json",
+            json={"reason": reason},
+        )
+
+    async def unpublish(self, product_id: str) -> dict[str, Any]:
+        """POST unpublish.json — notify Printify the product left the sales channel."""
+        shop_id = self._require_shop_id()
+        return await self._request(
+            "POST",
+            f"/shops/{shop_id}/products/{product_id}/unpublish.json",
+        )
+
+    async def list_webhooks(self) -> list[dict[str, Any]]:
+        shop_id = self._require_shop_id()
+        data = await self._request("GET", f"/shops/{shop_id}/webhooks.json")
+        if isinstance(data, list):
+            return [row for row in data if isinstance(row, dict)]
+        rows = data.get("data") if isinstance(data, dict) else None
+        if isinstance(rows, list):
+            return [row for row in rows if isinstance(row, dict)]
+        return []
+
+    async def create_webhook(
+        self,
+        *,
+        topic: str,
+        url: str,
+        secret: str | None = None,
+    ) -> dict[str, Any]:
+        shop_id = self._require_shop_id()
+        payload: dict[str, Any] = {"topic": topic, "url": url}
+        if secret:
+            payload["secret"] = secret
+        return await self._request(
+            "POST",
+            f"/shops/{shop_id}/webhooks.json",
+            json=payload,
+        )
+
+    async def update_webhook(
+        self,
+        webhook_id: str,
+        *,
+        url: str | None = None,
+        secret: str | None = None,
+    ) -> dict[str, Any]:
+        shop_id = self._require_shop_id()
+        payload: dict[str, Any] = {}
+        if url is not None:
+            payload["url"] = url
+        if secret is not None:
+            payload["secret"] = secret
+        return await self._request(
+            "PUT",
+            f"/shops/{shop_id}/webhooks/{webhook_id}.json",
+            json=payload,
+        )
+
 
 def map_address_to(shipping_address: dict[str, Any]) -> dict[str, str]:
     """Map Oshkelosh shipping_address keys to Printify address_to fields."""

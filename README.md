@@ -21,7 +21,7 @@ Multiple suppliers can be enabled at the same time. Fulfillment runs when an ord
 3. Open **Admin → Suppliers → Printify** at `/admin/suppliers/printify`
 4. Paste the token, enable the addon, and save — shop ID is auto-discovered from `GET /v1/shops.json`
 
-Tokens are long JWT-style strings; that is normal. Required scopes: `shops.read`, `products.read`, `orders.read`, `orders.write`, and `catalog.read` (blueprint title → category on sync).
+Tokens are long JWT-style strings; that is normal. Required scopes: `shops.read`, `products.read`, `products.write`, `orders.read`, `orders.write`, `catalog.read`, `webhooks.read`, and `webhooks.write`.
 
 ## Configuration schema
 
@@ -31,6 +31,7 @@ Tokens are long JWT-style strings; that is normal. Required scopes: `shops.read`
 | `shop_id` | string | Auto-filled on save when the token has exactly one shop; optional override for multi-shop tokens |
 | `is_active` | bool | Whether the addon is active |
 | `auto_confirm` | bool | Send order to production after create |
+| `webhook_secret` | secret | HMAC secret for `X-Pfy-Signature` on the publish webhook |
 
 ## Routes
 
@@ -40,13 +41,14 @@ Tokens are long JWT-style strings; that is normal. Required scopes: `shops.read`
 |--------|------|-------------|
 | GET | `/api/v1/suppliers/printify/products` | List catalog products |
 | GET | `/api/v1/suppliers/printify/products/{id}` | Single product detail |
+| POST | `/api/v1/suppliers/printify/webhook` | Publish handshake (`product:publish:started`) |
 
 ### Admin
 
 | Method | Path | Description |
 |--------|------|-------------|
 | GET | `/admin/suppliers/printify` | Config form |
-| POST | `/admin/suppliers/printify/save` | Save config |
+| POST | `/admin/suppliers/printify/save` | Save config (also ensures the publish webhook) |
 | POST | `/admin/suppliers/printify/sync` | Trigger catalog sync |
 
 ## Core integration
@@ -55,6 +57,7 @@ Tokens are long JWT-style strings; that is normal. Required scopes: `shops.read`
 - **Fulfillment:** creates Printify order; optional send-to-production when `auto_confirm` is true
 - **Checkout shipping:** core calls `quote_shipping()` → `POST orders/shipping.json` for Printify line items (prefers standard, else cheapest). Unquoted or failed quotes fall back to Site Settings like any other supplier.
 - **Grouping:** line items grouped by fulfillment key `printify`
+- **Publish handshake:** after catalog sync, calls `publish.json` then `publishing_succeeded` with local product id + `{PUBLIC_APP_URL}/products/{slug}`. `publish.json` is 200 req / 30 min. On `product:publish:started` webhooks, ACK only (`publishing_succeeded`). Missing local products → `publishing_failed`; delete action → `unpublish`.
 
 ## Variant supplier fields
 
@@ -86,11 +89,13 @@ Supported. Admin sync at `/admin/suppliers/printify` or `POST /admin/suppliers/p
 
 **Images:** Sync downloads Printify mockups onto **variants** only (`SupplierCatalogProduct.image_urls` stays empty, same as Printful). Core stores local media as root-relative `/media/files/...` URLs so admin works on any browse host; set `PUBLIC_APP_URL` for absolute SEO/email links. Re-sync does not re-download images for existing variants.
 
+**Publish handshake:** After a successful sync, each touched product is published (`publish.json`, 200 req / 30 min) then acknowledged via `publishing_succeeded`. Configure `webhook_secret` and `PUBLIC_APP_URL`, then save — the addon registers `product:publish:started` so the Printify UI Publish button ACKs against this storefront.
+
 **Prerequisites:**
 
 - Products must exist in the auto-discovered (or override) shop.
 - Hidden products and disabled variants are skipped.
-- PAT needs `catalog.read` for blueprint → category mapping.
+- PAT needs `catalog.read` for blueprint → category mapping; `products.write` + `webhooks.*` for the publish handshake.
 - Nested-git **Admin → Update** overwrites this package — commit fixes into the Printify addon repo before updating.
 
 ## Provider setup
@@ -108,6 +113,7 @@ printify/
 ├── addon.py
 ├── catalog.py
 ├── client.py
+├── publish.py
 ├── routes.py
 └── templates/
 ```

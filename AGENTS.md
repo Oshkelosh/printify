@@ -12,6 +12,7 @@ Print-on-demand supplier via Printify. Addon ID: `printify`. Fulfillment key: `p
 - `addon.py`
 - `catalog.py`
 - `client.py`
+- `publish.py`
 - `oshkelosh-addon.json`
 - `routes.py`
 - `templates/`
@@ -20,7 +21,7 @@ Print-on-demand supplier via Printify. Addon ID: `printify`. Fulfillment key: `p
 ## Package specifics
 
 **Category ceiling:** Many suppliers may be active; fulfillment runs on order `paid`; supplier IDs on variants; sync keys in package README.
-**Config fields:** `api_key` (secret), `shop_id` (optional multi-shop override), `is_active` (bool), `auto_confirm` (bool)
+**Config fields:** `api_key` (secret), `shop_id` (optional multi-shop override), `is_active` (bool), `auto_confirm` (bool), `webhook_secret` (secret; publish webhook HMAC)
 
 ## Invariants
 
@@ -30,6 +31,7 @@ Print-on-demand supplier via Printify. Addon ID: `printify`. Fulfillment key: `p
 - Catalog: parent name/description from shop product; strip HTML from descriptions
 - Catalog: resolve shop `variant.options` ID arrays against product `options` axes → `SupplierCatalogVariant.attributes` (`color`/`size` → `Color`/`Size`); titles alone are not picker axes
 - Catalog: images on variants only; `product_type` from blueprint title → `options["Product type"]` (category on create only)
+- Publish handshake: catalog sync calls `publish.json` then `publishing_succeeded`; webhook path is `publishing_succeeded` / `failed` / `unpublish` only. `publish.json` is 200 req / 30 min.
 - Use `app/addons/log.py` for structured logging
 - Admin mutating forms need CSRF; use `render_addon_admin_page` correctly
 - Nested `.git`: Admin **Update** overwrites this tree — ship fixes in the Printify addon repo
